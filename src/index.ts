@@ -5,22 +5,20 @@ import { sqliteTable } from "drizzle-orm/sqlite-core";
 import { mysqlTable } from "drizzle-orm/mysql-core";
 import { pgTable } from "drizzle-orm/pg-core";
 import type { DialectHandler } from "./dialects/base";
+import { PostgresHandler } from "./dialects/postgres";
+import { SQLiteHandler } from "./dialects/sqlite";
 
-function getDialectHandler<SD extends Dialects>(dialect: TableOptions<any, SD>[ "dialect" ]): Promise<DialectHandler> {
-  let handlerPromise: Promise<DialectHandler>;
+function getDialectHandler<SD extends Dialects>(dialect: TableOptions<any, SD>[ "dialect" ]): DialectHandler {
   switch (dialect) {
     case "sqlite":
-      handlerPromise = import("./dialects/sqlite").then(mod => new mod.SQLiteHandler());
-      break;
+      return new SQLiteHandler();
     case "mysql":
       throw new Error("MySQL support coming soon");
     case "postgres":
-      handlerPromise = import("./dialects/postgres").then(mod => new mod.PostgresHandler());
-      break;
+      return new PostgresHandler();
     default:
       throw new Error(`Unsupported dialect ${dialect}`);
   }
-  return handlerPromise;
 }
 
 function isOptionalType(schema: z.ZodTypeAny): boolean {
@@ -56,7 +54,7 @@ function zodToDrizzle(
   schema: z.ZodTypeAny,
   isOptional: boolean,
   handler: DialectHandler,
-  refs?: TableOptions<any, any>["references"],
+  refs?: TableOptions<any, any>[ "references" ],
 ) {
   const baseType = unwrapType(schema);
   const withDefault = hasDefault(schema);
@@ -125,24 +123,24 @@ function zodToDrizzle(
 }
 
 interface Reference {
-  table: DrizzleTables[keyof DrizzleTables];
-  columns: [keyof z.infer<any>, string][];
+  table: DrizzleTables[ keyof DrizzleTables ];
+  columns: [ keyof z.infer<any>, string ][];
   onDelete?: "cascade" | "restrict" | "set null" | "no action";
 }
 
 function findReference<SD extends Dialects>(
   columnName: string,
-  refs?: TableOptions<any, SD>["references"],
+  refs?: TableOptions<any, SD>[ "references" ],
 ): Reference[] | undefined {
   if (!refs) return undefined;
 
   for (const ref of refs) {
-    const match = ref.columns.find(([local]) => local === columnName);
+    const match = ref.columns.find(([ local ]) => local === columnName);
     if (match) {
       return [
         {
           table: ref.table,
-          columns: [match],
+          columns: [ match ],
           onDelete: ref.onDelete,
         },
       ];
@@ -157,15 +155,15 @@ export function createTableFromZod<T extends z.ZodObject<any>, SD extends Dialec
   options: TableOptions<T, SD>,
 ) {
   const { dialect, primaryKey, references } = options;
-  getDialectHandler(dialect).then((handler) => {
+  const handler = getDialectHandler(dialect);
   const shape = schema.shape;
   const columns: Record<string, any> = {};
 
-  for (const [key, value] of Object.entries(shape)) {
+  for (const [ key, value ] of Object.entries(shape)) {
     const isOptional = isOptionalType(value as z.ZodTypeAny);
     const ref = findReference(key, references);
 
-    columns[key] = zodToDrizzle(
+    columns[ key ] = zodToDrizzle(
       value as z.ZodTypeAny,
       isOptional,
       handler,
@@ -173,7 +171,7 @@ export function createTableFromZod<T extends z.ZodObject<any>, SD extends Dialec
     );
 
     if (primaryKey === key) {
-      columns[key] = handler.primaryKey(schema);
+      columns[ key ] = handler.primaryKey(schema);
     }
   }
 
@@ -187,7 +185,6 @@ export function createTableFromZod<T extends z.ZodObject<any>, SD extends Dialec
     default:
       return sqliteTable(tableName, columns);
   }
-  });
 }
 
 export * from "./types";
