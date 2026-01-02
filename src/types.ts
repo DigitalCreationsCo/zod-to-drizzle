@@ -19,7 +19,7 @@ export interface TableOptions<T extends z.ZodTypeAny, SD extends Dialects> {
   primaryKey?: keyof z.infer<T>;
   dialect: SD;
   references?: Array<{
-    table: DrizzleTables[ SD ];
+    table: Record<string, any>;
     columns: [keyof z.infer<T>, string][];
     onDelete?: "cascade" | "restrict" | "set null" | "no action"; // does nothing for now
   }>;

@@ -6,6 +6,7 @@ import { createTableFromZod } from "../src";
 const UserSchema = z.object({
     id: z.number(),
     name: z.string(),
+    tag: z.literal("user"),
     email: z.string().email().optional(),
     createdAt: z.number().default(Date.now),
 });
@@ -14,4 +15,4 @@ const UserSchema = z.object({
 const users = createTableFromZod("users", UserSchema, {
     dialect: "sqlite",
     primaryKey: "id",
-});
+}); 

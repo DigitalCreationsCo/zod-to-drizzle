@@ -25,7 +25,6 @@ function isOptionalType(schema: z.ZodTypeAny): boolean {
   return (
     schema instanceof z.ZodOptional ||
     schema instanceof z.ZodNullable ||
-    schema instanceof z.ZodNullable ||
     hasDefault(schema)
   );
 }
@@ -34,18 +33,22 @@ function hasDefault(schema: z.ZodTypeAny): boolean {
   return schema instanceof z.ZodDefault;
 }
 
-function unwrapType(schema: z.ZodType): z.ZodType {
+export function unwrapType(schema: z.ZodType): z.ZodType {
   if (schema.def.type === "default") {
-    return unwrapType((schema as z.ZodDefault<any>).unwrap());
+    const unwrapped = unwrapType((schema as z.ZodDefault<any>).unwrap());
+    return unwrapped;
   }
   if (schema.def.type === "optional") {
-    return unwrapType((schema as z.ZodOptional<any>).unwrap());
+    const unwrapped = unwrapType((schema as z.ZodOptional<any>).unwrap());
+    return unwrapped;
   }
   if (schema.def.type === "nullable") {
-    return unwrapType((schema as z.ZodNullable<any>).unwrap());
+    const unwrapped = unwrapType((schema as z.ZodNullable<any>).unwrap());
+    return unwrapped;
   }
   if (schema.def.type === "pipe") {
-    return unwrapType(schema.pipe(schema).out);
+    const unwrapped = unwrapType((schema as z.ZodPipe<any>).def.out as z.ZodType);
+    return unwrapped;
   }
   return schema;
 }
@@ -89,9 +92,7 @@ function zodToDrizzle(
     return handler.string(true); // Always optional
   }
   if (baseType.def.type === "literal") {
-    // Handle based on literal type
-    // @ts-expect-error - value is not typed
-    const literalValue = baseType.value;
+    const literalValue = (baseType as z.ZodLiteral).value;
     if (typeof literalValue === "string") {
       return handler.string(isOptional, refs);
     }
@@ -123,7 +124,7 @@ function zodToDrizzle(
 }
 
 interface Reference {
-  table: DrizzleTables[ keyof DrizzleTables ];
+  table: Record<string, any>;
   columns: [ keyof z.infer<any>, string ][];
   onDelete?: "cascade" | "restrict" | "set null" | "no action";
 }
