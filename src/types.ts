@@ -13,20 +13,25 @@ import type { z } from "zod";
 export type JsonField = { _type: "json" };
 export type ColumnWithMeta = Column & { meta?: JsonField };
 
-export type SupportedDialects = "sqlite" | "postgres" | "mysql";
+export type Dialects = "sqlite" | "postgres" | "mysql";
 
-export interface TableOptions<T extends z.ZodTypeAny> {
+export interface TableOptions<T extends z.ZodTypeAny, SD extends Dialects> {
   primaryKey?: keyof z.infer<T>;
-  dialect?: SupportedDialects;
+  dialect: SD;
   references?: Array<{
-    table: DrizzleTable;
+    table: DrizzleTables[ SD ];
     columns: [keyof z.infer<T>, string][];
     onDelete?: "cascade" | "restrict" | "set null" | "no action"; // does nothing for now
   }>;
 }
 
-export type DrizzleColumn = SQLiteColumn | PgColumn | MySqlColumn;
-export type DrizzleTable =
-  | SQLiteTableWithColumns<any>
-  | PgTableWithColumns<any>
-  | MySqlTableWithColumns<any>;
+export type DrizzleColumns = {
+  "sqlite": SQLiteColumn;
+  "postgres": PgColumn;
+  "mysql": MySqlColumn;
+};
+export type DrizzleTables = {
+  "sqlite": SQLiteTableWithColumns<any>;
+  "postgres": PgTableWithColumns<any>;
+  "mysql": MySqlTableWithColumns<any>;
+};
