@@ -6,7 +6,7 @@ import { z } from "zod";
 export class SQLiteHandler extends DialectHandler {
   string(
     isOptional: boolean,
-    refs?: TableOptions<any>["references"],
+    refs?: TableOptions<any, "sqlite">["references"],
   ): ColumnWithMeta {
     const column = refs
       ? text().references(() => {
@@ -23,7 +23,7 @@ export class SQLiteHandler extends DialectHandler {
   number(
     isOptional: boolean,
     hasDefault = false,
-    refs?: TableOptions<any>["references"],
+    refs?: TableOptions<any, "sqlite">["references"],
   ): ColumnWithMeta {
     const column = refs
       ? integer().references(() => {

@@ -1,4 +1,4 @@
-import { integer, text } from "drizzle-orm/pg-core";
+import { integer, serial, text } from "drizzle-orm/pg-core";
 import { DialectHandler } from "./base";
 import type { ColumnWithMeta, TableOptions } from "../types";
 import { z } from "zod";
@@ -6,7 +6,7 @@ import { z } from "zod";
 export class PostgresHandler extends DialectHandler {
     string(
         isOptional: boolean,
-        refs?: TableOptions<any>[ "references" ],
+        refs?: TableOptions<any, "postgres">[ "references" ],
     ): ColumnWithMeta {
         const column = refs
             ? text().references(() => {
@@ -23,7 +23,7 @@ export class PostgresHandler extends DialectHandler {
     number(
         isOptional: boolean,
         hasDefault = false,
-        refs?: TableOptions<any>[ "references" ],
+        refs?: TableOptions<any, "postgres">[ "references" ],
     ): ColumnWithMeta {
         const column = refs
             ? integer().references(() => {
@@ -78,8 +78,6 @@ export class PostgresHandler extends DialectHandler {
         if (zodType instanceof z.ZodString) {
             return text().primaryKey() as unknown as ColumnWithMeta;
         }
-        return integer().primaryKey({
-            autoIncrement: true,
-        }) as unknown as ColumnWithMeta;
+        return serial().primaryKey() as unknown as ColumnWithMeta;
     }
 }

@@ -1,23 +1,26 @@
 import { z } from "zod";
 import { UnsupportedZodTypeError } from "./errors";
 import type { DrizzleTables, Dialects, TableOptions } from "./types";
-import { SQLiteHandler } from "./dialects/sqlite";
 import { sqliteTable } from "drizzle-orm/sqlite-core";
 import { mysqlTable } from "drizzle-orm/mysql-core";
 import { pgTable } from "drizzle-orm/pg-core";
 import type { DialectHandler } from "./dialects/base";
 
-function getDialectHandler<SD extends Dialects>(dialect: TableOptions<any, SD>[ "dialect" ]) {
+function getDialectHandler<SD extends Dialects>(dialect: TableOptions<any, SD>[ "dialect" ]): Promise<DialectHandler> {
+  let handlerPromise: Promise<DialectHandler>;
   switch (dialect) {
     case "sqlite":
-      return new SQLiteHandler();
+      handlerPromise = import("./dialects/sqlite").then(mod => new mod.SQLiteHandler());
+      break;
     case "mysql":
       throw new Error("MySQL support coming soon");
     case "postgres":
-      throw new Error("PostgreSQL support coming soon");
+      handlerPromise = import("./dialects/postgres").then(mod => new mod.PostgresHandler());
+      break;
     default:
       throw new Error(`Unsupported dialect ${dialect}`);
   }
+  return handlerPromise;
 }
 
 function isOptionalType(schema: z.ZodTypeAny): boolean {
@@ -153,9 +156,8 @@ export function createTableFromZod<T extends z.ZodObject<any>, SD extends Dialec
   schema: T,
   options: TableOptions<T, SD>,
 ) {
-  const { dialect = "sqlite", primaryKey, references } = options;
-  const handler = getDialectHandler(dialect);
-
+  const { dialect, primaryKey, references } = options;
+  getDialectHandler(dialect).then((handler) => {
   const shape = schema.shape;
   const columns: Record<string, any> = {};
 
@@ -185,6 +187,7 @@ export function createTableFromZod<T extends z.ZodObject<any>, SD extends Dialec
     default:
       return sqliteTable(tableName, columns);
   }
+  });
 }
 
 export * from "./types";
