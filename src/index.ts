@@ -34,7 +34,7 @@ function hasDefault(schema: z.ZodTypeAny): boolean {
   return schema instanceof z.ZodDefault;
 }
 
-function unwrapType(schema: z.ZodTypeAny): z.ZodTypeAny {
+function unwrapType(schema: z.ZodType): z.ZodType {
   if (schema.def.type === "default") {
     return unwrapType((schema as z.ZodDefault<any>).unwrap());
   }
@@ -45,7 +45,7 @@ function unwrapType(schema: z.ZodTypeAny): z.ZodTypeAny {
     return unwrapType((schema as z.ZodNullable<any>).unwrap());
   }
   if (schema.def.type === "pipe") {
-    return unwrapType(schema.pipe(schema));
+    return unwrapType(schema.pipe(schema).out);
   }
   return schema;
 }
