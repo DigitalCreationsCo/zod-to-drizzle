@@ -13,7 +13,7 @@ export type ColumnCreator = (meta: ColumnMeta) => any;
 
 export interface TableOptions<T extends z.ZodObject, D extends Dialects> {
     dialect: D;
-    primaryKey?: keyof z.infer<T>;
+    primaryKey?: keyof z.infer<T['shape']>;
     references?: Record<string, ColumnReference>;
     jsonColumns?: (schema: T) => Record<string, JsonColumnConfig<T, D>>;
 }
