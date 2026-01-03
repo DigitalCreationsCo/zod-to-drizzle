@@ -18,7 +18,9 @@
         "!**/node_modules/**"
       ],
       "resolveSourceMapLocations": [
+        "${workspaceFolder}/dist/**",
         "${workspaceFolder}/src/**",
+        "${workspaceFolder}/tests/**",
         "!**/node_modules/**"
       ]
     },
@@ -42,7 +44,9 @@
         "!**/node_modules/**"
       ],
       "resolveSourceMapLocations": [
+        "${workspaceFolder}/dist/**",
         "${workspaceFolder}/src/**",
+        "${workspaceFolder}/tests/**",
         "!**/node_modules/**"
       ]
     }
