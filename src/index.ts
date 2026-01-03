@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { SQLiteColumnBuilderBase, sqliteTable, SQLiteTableWithColumns } from "drizzle-orm/sqlite-core";
-import { MySqlColumn, MySqlColumnBuilderBase, mysqlTable, MySqlTableWithColumns } from "drizzle-orm/mysql-core";
-import { PgColumnBuilderBase, pgTable, PgTableWithColumns } from "drizzle-orm/pg-core";
+import { sqliteTable } from "drizzle-orm/sqlite-core";
+import { mysqlTable } from "drizzle-orm/mysql-core";
+import { pgTable } from "drizzle-orm/pg-core";
 import { createPostgresColumn } from "./dialects/postgres";
 import { createSQLiteColumn } from "./dialects/sqlite";
 import type { Column } from "drizzle-orm";
@@ -49,7 +49,7 @@ export function createTableFromZod<
         }
       }
 
-      // Validate column type must be jsonb (basic check)
+      // Validate column type must be jsonb
       const columnTypeStr = String(config.column);
       if (!columnTypeStr.includes('jsonb') && !columnTypeStr.includes('json')) {
         console.warn(
@@ -68,20 +68,17 @@ export function createTableFromZod<
       // Attach validation schema to column for runtime use
       (config.column as any).__zodSchema = validationSchema;
 
-      // Add the JSON column
       columns[ columnName ] = config.column;
     }
   }
 
   for (const [ name, zodObject ] of Object.entries<z.ZodType>(schema.shape)) {
-    // Skip if this field is marked as exclusive
     if (exclusiveFields.has(name))
       continue;
 
     const meta = extractColumnMeta(name, zodObject as ZodTableSchemaInput, options);
     columns[ name ] = createColumn(meta);
 
-    // Override with primary key if specified
     if (String(options.primaryKey) === name) {
       columns[ name ] = createColumn({
         ...meta,
@@ -188,7 +185,7 @@ export function getJsonColumnValidator<T extends ZodTableSchemaInput>(
 
 function extractColumnMeta<T extends z.ZodObject, D extends Dialects>(
   name: string,
-  zodType: ZodTableSchemaInput,
+  zodType: z.ZodType,
   options: TableOptions<T, D>
 ): ColumnMeta {
   const unwrapped = unwrapType(zodType);

@@ -22,10 +22,6 @@ const UserSchema = z.object({
     createdAt: z.number().default(Date.now),
 });
 
-// export const organizations = pgTable("organizations", {
-//     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-//     name: text("name").notNull().unique(),
-// });
 
 const [ users, columns ] = createTableFromZod("users", UserSchema, {
     dialect: "postgres",
@@ -37,16 +33,9 @@ const [ users, columns ] = createTableFromZod("users", UserSchema, {
             exclusive: false
         }
     })
-    // references: {
-    //     orgId: {
-    //         table: organizations,
-    //         column: "id",
-    //         onDelete: "cascade",
-    //     },
-    // },
 });
 
-console.log('creating table for schema: ');
+console.log('creating table for users schema\n');
 console.log(UserSchema.shape);
 
 console.log('end');

@@ -1,10 +1,8 @@
 import { z } from "zod";
-import { SQLiteColumnBuilderBase, sqliteTable, SQLiteTableWithColumns } from "drizzle-orm/sqlite-core";
-import { MySqlColumn, MySqlColumnBuilderBase, mysqlTable, MySqlTableWithColumns } from "drizzle-orm/mysql-core";
-import { PgColumnBuilderBase, pgTable, PgTableWithColumns } from "drizzle-orm/pg-core";
-import { createPostgresColumn } from "./dialects/postgres";
-import { createSQLiteColumn } from "./dialects/sqlite";
-import type { Column, ColumnBaseConfig, ColumnBuilderBase, TableConfig } from "drizzle-orm";
+import { SQLiteColumnBuilderBase, SQLiteTableWithColumns } from "drizzle-orm/sqlite-core";
+import { MySqlColumn, MySqlColumnBuilderBase, MySqlTableWithColumns } from "drizzle-orm/mysql-core";
+import { PgColumnBuilderBase, PgTableWithColumns } from "drizzle-orm/pg-core";
+import type { Column, TableConfig } from "drizzle-orm";
 
 
 export type ZodTableSchemaInput = z.ZodObject<any> | z.ZodIntersection<any, any>;
@@ -13,7 +11,7 @@ export type ColumnCreator = (meta: ColumnMeta) => any;
 
 export interface TableOptions<T extends z.ZodObject, D extends Dialects> {
     dialect: D;
-    primaryKey?: keyof z.infer<T['shape']>;
+    primaryKey?: keyof z.infer<T>;
     references?: Record<string, ColumnReference>;
     jsonColumns?: (schema: T) => Record<string, JsonColumnConfig<T, D>>;
 }

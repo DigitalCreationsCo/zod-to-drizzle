@@ -1,15 +1,17 @@
 import { integer, serial, text, boolean } from "drizzle-orm/pg-core";
 import type { ColumnMeta } from "..";
 
+// ========================================
+// dialects/postgres.ts
+// ========================================
+
 export function createPostgresColumn(meta: ColumnMeta) {
-    // Primary key handling
     if (meta.isPrimaryKey) {
         return meta.type === "string"
             ? text(meta.name).primaryKey()
             : serial(meta.name).primaryKey();
     }
 
-    // Base column creation
     let column: any;
 
     switch (meta.type) {
@@ -29,13 +31,11 @@ export function createPostgresColumn(meta: ColumnMeta) {
             break;
     }
 
-    // Apply reference
     if (meta.reference) {
         const ref = meta.reference;
         column = column.references(() => ref.table[ ref.column ]);
     }
 
-    // Apply NOT NULL
     if (!meta.isOptional && !meta.hasDefault) {
         column = column.notNull();
     }

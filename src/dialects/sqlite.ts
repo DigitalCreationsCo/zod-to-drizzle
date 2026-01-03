@@ -13,7 +13,6 @@ export function createSQLiteColumn(meta: ColumnMeta) {
       : integer(meta.name).primaryKey({ autoIncrement: true });
   }
 
-  // Base column creation
   let column: any;
 
   switch (meta.type) {
@@ -29,13 +28,11 @@ export function createSQLiteColumn(meta: ColumnMeta) {
       break;
   }
 
-  // Apply reference
   if (meta.reference) {
     const ref = meta.reference;
     column = column.references(() => ref.table[ ref.column ]);
   }
 
-  // Apply NOT NULL
   if (!meta.isOptional && !meta.hasDefault) {
     column = column.notNull();
   }
