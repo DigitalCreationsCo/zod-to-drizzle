@@ -1,83 +1,44 @@
-import { integer, serial, text } from "drizzle-orm/pg-core";
-import { DialectHandler } from "./base";
-import type { ColumnWithMeta, TableOptions } from "../types";
-import { z } from "zod";
+import { integer, serial, text, boolean } from "drizzle-orm/pg-core";
+import type { ColumnMeta } from "..";
 
-export class PostgresHandler extends DialectHandler {
-    string(
-        isOptional: boolean,
-        refs?: TableOptions<any, "postgres">[ "references" ],
-    ): ColumnWithMeta {
-        const column = refs
-            ? text().references(() => {
-                const table = refs[ 0 ]?.table;
-                const column = refs[ 0 ]?.columns[ 0 ]?.[ 1 ] ?? "";
-                return table?.[ column ];
-            })
-            : text();
-        return isOptional
-            ? (column as unknown as ColumnWithMeta)
-            : (column.notNull() as unknown as ColumnWithMeta);
+export function createPostgresColumn(meta: ColumnMeta) {
+    // Primary key handling
+    if (meta.isPrimaryKey) {
+        return meta.type === "string"
+            ? text(meta.name).primaryKey()
+            : serial(meta.name).primaryKey();
     }
 
-    number(
-        isOptional: boolean,
-        hasDefault = false,
-        refs?: TableOptions<any, "postgres">[ "references" ],
-    ): ColumnWithMeta {
-        const column = refs
-            ? integer().references(() => {
-                const table = refs[ 0 ]?.table;
-                const column = refs[ 0 ]?.columns[ 0 ]?.[ 1 ] ?? "";
-                return table?.[ column ];
-            })
-            : integer();
-        return isOptional || hasDefault
-            ? (column as unknown as ColumnWithMeta)
-            : (column.notNull() as unknown as ColumnWithMeta);
+    // Base column creation
+    let column: any;
+
+    switch (meta.type) {
+        case "string":
+        case "enum":
+        case "json":
+            column = text(meta.name);
+            break;
+        case "number":
+            column = integer(meta.name);
+            break;
+        case "boolean":
+            column = boolean(meta.name);
+            break;
+        case "date":
+            column = integer(meta.name); // Unix timestamp
+            break;
     }
 
-    boolean(isOptional: boolean, hasDefault = false): ColumnWithMeta {
-        const column = integer();
-        return isOptional || hasDefault
-            ? (column as unknown as ColumnWithMeta)
-            : (column.notNull() as unknown as ColumnWithMeta);
+    // Apply reference
+    if (meta.reference) {
+        const ref = meta.reference;
+        column = column.references(() => ref.table[ ref.column ]);
     }
 
-    json(isOptional: boolean): ColumnWithMeta {
-        const column = text();
-        const finalColumn = isOptional
-            ? column
-            : (column.notNull() as unknown as ColumnWithMeta);
-        // (finalColumn as any).meta = { _type: "json" };
-        return finalColumn as unknown as ColumnWithMeta;
+    // Apply NOT NULL
+    if (!meta.isOptional && !meta.hasDefault) {
+        column = column.notNull();
     }
 
-    date(isOptional: boolean): ColumnWithMeta {
-        const column = integer();
-        return isOptional
-            ? (column as unknown as ColumnWithMeta)
-            : (column.notNull() as unknown as ColumnWithMeta);
-    }
-
-    enum(isOptional: boolean): ColumnWithMeta {
-        const column = text();
-        return isOptional
-            ? (column as unknown as ColumnWithMeta)
-            : (column.notNull() as unknown as ColumnWithMeta);
-    }
-
-    nativeEnum(isOptional: boolean): ColumnWithMeta {
-        const column = integer();
-        return isOptional
-            ? (column as unknown as ColumnWithMeta)
-            : (column.notNull() as unknown as ColumnWithMeta);
-    }
-
-    primaryKey(zodType: z.ZodType): ColumnWithMeta {
-        if (zodType instanceof z.ZodString) {
-            return text().primaryKey() as unknown as ColumnWithMeta;
-        }
-        return serial().primaryKey() as unknown as ColumnWithMeta;
-    }
+    return column;
 }
