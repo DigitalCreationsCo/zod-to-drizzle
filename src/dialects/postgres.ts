@@ -5,7 +5,9 @@ import type { ColumnMeta } from "..";
 // dialects/postgres.ts
 // ========================================
 
-export function createPostgresColumn(meta: ColumnMeta) {
+import { Dialects } from "..";
+
+export function createPostgresColumn(meta: ColumnMeta<"postgres">) {
     if (meta.isPrimaryKey) {
         return meta.type === "string"
             ? text(meta.name).primaryKey()
@@ -31,10 +33,6 @@ export function createPostgresColumn(meta: ColumnMeta) {
             break;
     }
 
-    if (meta.reference) {
-        const ref = meta.reference;
-        column = column.references(() => ref.table[ ref.column ]);
-    }
 
     if (!meta.isOptional && !meta.hasDefault) {
         column = column.notNull();

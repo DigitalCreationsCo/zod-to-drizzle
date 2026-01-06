@@ -5,7 +5,9 @@ import { ColumnMeta } from "..";
 // dialects/sqlite.ts
 // ========================================
 
-export function createSQLiteColumn(meta: ColumnMeta) {
+import { Dialects } from "..";
+
+export function createSQLiteColumn(meta: ColumnMeta<"sqlite">) {
   // Primary key handling
   if (meta.isPrimaryKey) {
     return meta.type === "string"
@@ -28,10 +30,6 @@ export function createSQLiteColumn(meta: ColumnMeta) {
       break;
   }
 
-  if (meta.reference) {
-    const ref = meta.reference;
-    column = column.references(() => ref.table[ ref.column ]);
-  }
 
   if (!meta.isOptional && !meta.hasDefault) {
     column = column.notNull();

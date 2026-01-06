@@ -1,289 +1,366 @@
 import { z } from "zod";
-import { sqliteTable } from "drizzle-orm/sqlite-core";
-import { mysqlTable } from "drizzle-orm/mysql-core";
-import { pgTable } from "drizzle-orm/pg-core";
-import { createPostgresColumn } from "./dialects/postgres";
-import { createSQLiteColumn } from "./dialects/sqlite";
-import type { Column } from "drizzle-orm";
-import { ColumnCreator, ColumnMeta, ColumnsByDialect, Dialects, TableOptions, TableTypeByDialect, ValidatedJsonColumn, ZodTableSchemaInput } from "./types";
+import {
+  pgTable,
+  text as pgText,
+  integer as pgInteger,
+  boolean as pgBoolean,
+  timestamp,
+  serial,
+  real as pgReal,
+  numeric,
+  varchar as pgVarchar,
+  uuid,
+  jsonb,
+} from "drizzle-orm/pg-core";
+import {
+  sqliteTable,
+  text as sqliteText,
+  integer as sqliteInteger,
+  real as sqliteReal,
+} from "drizzle-orm/sqlite-core";
 
-export function createTableFromZod<
-  T extends z.ZodObject,
-  D extends Dialects
->(
-  tableName: string,
-  _schema: T extends ZodTableSchemaInput ? z.infer<ZodTableSchemaInput> : T,
-  options: TableOptions<T, D>,
-): TableTypeByDialect<D> & readonly [ TableTypeByDialect<D>, ColumnsByDialect<D> ] {
+type DatabaseDialect = "postgres" | "sqlite";
 
-  const schema = getJoinedSchema(_schema) as T;
+export interface JsonColumnConfig<T extends z.ZodRawShape> {
+  fields: (Extract<keyof T, string>)[];
+  exclusive: boolean;
+}
 
-  const createColumn = getColumnCreator(options.dialect);
-  const columns: ColumnsByDialect<D> = {};
+export interface ForeignKeyReference<TTable = any> {
+  table: TTable;
+  columns: [ string, string ][];
+}
 
-  const exclusiveFields = new Set<string>();
-  const jsonColumnsConfig = options.jsonColumns?.(schema);
+export interface ConversionOptions<T extends z.ZodRawShape> {
+  dialect: DatabaseDialect;
+  primaryKey?: string;
+  jsonColumns?: (schema: z.ZodObject<T>) => Record<string, JsonColumnConfig<T>>;
+  references?: ForeignKeyReference[];
+  varcharLengths?: Record<string, number>;
+  autoIncrementId?: boolean;
+}
 
-  if (jsonColumnsConfig) {
-    for (const [ columnName, config ] of Object.entries(jsonColumnsConfig)) {
-      const fieldNames = config.fields.map(String);
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
 
-      // Validate all fields must exist in schema
-      for (const fieldName of fieldNames) {
-        if (!(fieldName in schema.shape)) {
-          throw new Error(
-            `Field "${fieldName}" in jsonColumns["${columnName}"].fields does not exist in schema`
-          );
-        }
-      }
+type UnwrapZod<T> = T extends z.ZodOptional<infer U>
+  ? UnwrapZod<U>
+  : T extends z.ZodNullable<infer U>
+  ? UnwrapZod<U>
+  : T extends z.ZodDefault<infer U>
+  ? UnwrapZod<U>
+  : T;
 
-      // Validate check for duplicate exclusive fields
-      if (config.exclusive) {
-        for (const fieldName of fieldNames) {
-          if (exclusiveFields.has(fieldName)) {
-            throw new Error(
-              `Field "${fieldName}" is marked as exclusive in multiple jsonColumns`
-            );
-          }
-          exclusiveFields.add(fieldName);
-        }
-      }
+type IsOptional<T> = T extends z.ZodOptional<any>
+  ? true
+  : T extends z.ZodNullable<any>
+  ? true
+  : false;
 
-      // Validate column type must be jsonb
-      const columnTypeStr = String(config.column);
-      if (!columnTypeStr.includes('jsonb') && !columnTypeStr.includes('json')) {
-        console.warn(
-          `Warning: jsonColumns["${columnName}"] should use jsonb column type. ` +
-          `Other types are not supported for validated JSON columns.`
+type ZodToPgColumn<TName extends string, TZodType> = UnwrapZod<TZodType> extends z.ZodString
+  ? ReturnType<typeof pgText>
+  : UnwrapZod<TZodType> extends z.ZodNumber
+  ? ReturnType<typeof pgInteger<TName>>
+  : UnwrapZod<TZodType> extends z.ZodBoolean
+  ? ReturnType<typeof pgBoolean<TName>>
+  : UnwrapZod<TZodType> extends z.ZodDate
+  ? ReturnType<typeof timestamp<TName, 'date'>>
+  : UnwrapZod<TZodType> extends z.ZodArray<any>
+  ? ReturnType<typeof jsonb<TName>>
+  : UnwrapZod<TZodType> extends z.ZodObject<any>
+  ? ReturnType<typeof jsonb<TName>>
+  : UnwrapZod<TZodType> extends z.ZodRecord<any, any>
+  ? ReturnType<typeof jsonb<TName>>
+  : ReturnType<typeof pgText>;
+
+type ZodToSqliteColumn<TName extends string, TZodType> =
+  UnwrapZod<TZodType> extends z.ZodString
+  ? ReturnType<typeof sqliteText>
+  : UnwrapZod<TZodType> extends z.ZodNumber
+  ? ReturnType<typeof sqliteInteger<TName, 'number'>>
+  : UnwrapZod<TZodType> extends z.ZodBoolean
+  ? ReturnType<typeof sqliteInteger<TName, 'boolean'>>
+  : UnwrapZod<TZodType> extends z.ZodDate
+  ? ReturnType<typeof sqliteInteger<TName, 'timestamp'>>
+  : UnwrapZod<TZodType> extends z.ZodArray<any>
+  ? ReturnType<typeof sqliteText>
+  : UnwrapZod<TZodType> extends z.ZodObject<any>
+  ? ReturnType<typeof sqliteText>
+  : UnwrapZod<TZodType> extends z.ZodRecord<any, any>
+  ? ReturnType<typeof sqliteText>
+  : ReturnType<typeof sqliteText>;
+
+type BuildJsonColumns<
+  TShape extends z.ZodRawShape,
+  TJsonConfig extends Record<string, JsonColumnConfig<TShape>> | undefined,
+  TDialect extends DatabaseDialect
+> = TJsonConfig extends Record<string, JsonColumnConfig<TShape>>
+  ? {
+    [ K in keyof TJsonConfig & string ]: TDialect extends "postgres"
+    ? ReturnType<typeof jsonb<K>>
+    : ReturnType<typeof sqliteText>;
+  }
+  : {};
+
+type ExtractExclusiveFields<TShape extends z.ZodRawShape, T> = T extends Record<string, JsonColumnConfig<TShape>>
+  ? {
+    [ K in keyof T ]: T[ K ][ "exclusive" ] extends true
+    ? T[ K ][ 'fields' ][ number ]
+    : never;
+  }[ keyof T ]
+  : never;
+
+type BuildColumnMap<
+  TShape extends z.ZodRawShape,
+  TDialect extends DatabaseDialect,
+  TExclusiveFields extends string = never,
+  TJsonCols extends Record<string, any> = {}
+> = {
+  [ K in keyof TShape as K extends TExclusiveFields ? never : K & string ]: TDialect extends "postgres"
+  ? ZodToPgColumn<K & string, TShape[ K ]>
+  : ZodToSqliteColumn<K & string, TShape[ K ]>;
+} & TJsonCols;
+
+// ---------------------------------------------------------------------------
+// JSON parsing helper
+// ---------------------------------------------------------------------------
+
+export function parseJson<T extends z.ZodTypeAny>(raw: unknown, schema: T): z.infer<T> {
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return schema.parse(parsed);
+    } catch (err) {
+      throw new Error(`Failed to parse JSON column: ${(err as Error).message}`);
+    }
+  } else {
+    return schema.parse(raw);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Runtime invariant for exclusive JSON columns
+// ---------------------------------------------------------------------------
+
+export function assertExclusiveJsonWrites<TShape extends z.ZodRawShape>(
+  payload: Record<string, any>,
+  schema: z.ZodObject<TShape>,
+  jsonConfig?: Record<string, JsonColumnConfig<TShape>>
+) {
+  if (!jsonConfig) return;
+
+  for (const [ jsonCol, config ] of Object.entries(jsonConfig)) {
+    if (!config.exclusive) continue;
+
+    for (const field of config.fields) {
+      if (field in payload && !(jsonCol in payload)) {
+        throw new Error(
+          `Exclusive JSON column "${jsonCol}" is required when field "${String(field)}" is provided`
         );
       }
+    }
+  }
+}
 
-      // Create validation schema from selected fields
-      const validationSchema = z.object(
-        Object.fromEntries(
-          fieldNames.map(name => [ name, schema.shape[ name ] ])
-        )
-      );
+// ---------------------------------------------------------------------------
+// Type-safe createTableFromZod
+// ---------------------------------------------------------------------------
 
-      // Attach validation schema to column for runtime use
-      (config.column as any).__zodSchema = validationSchema;
+export function createTableFromZod<
+  const TName extends string,
+  TShape extends z.ZodRawShape,
+  TJsonConfig extends Record<string, JsonColumnConfig<TShape>> | undefined = undefined
+>(
+  tableName: TName,
+  zodSchema: z.ZodObject<TShape>,
+  options: ConversionOptions<TShape> & { dialect: "postgres"; }
+): ReturnType<typeof pgTable<TName, BuildColumnMap<
+  TShape,
+  "postgres",
+  TJsonConfig extends Record<string, JsonColumnConfig<TShape>> ? ExtractExclusiveFields<TShape, TJsonConfig> : never,
+  BuildJsonColumns<TShape, TJsonConfig, "postgres">
+>>>;
 
-      columns[ columnName ] = config.column;
+export function createTableFromZod<
+  const TName extends string,
+  TShape extends z.ZodRawShape,
+  TJsonConfig extends Record<string, JsonColumnConfig<TShape>> | undefined = undefined
+>(
+  tableName: TName,
+  zodSchema: z.ZodObject<TShape>,
+  options: ConversionOptions<TShape> & { dialect: "sqlite"; }
+): ReturnType<typeof sqliteTable<TName, BuildColumnMap<
+  TShape,
+  "sqlite",
+  TJsonConfig extends Record<string, JsonColumnConfig<TShape>> ? ExtractExclusiveFields<TShape, TJsonConfig> : never,
+  BuildJsonColumns<TShape, TJsonConfig, "sqlite">
+>>>;
+
+export function createTableFromZod<
+  TName extends string,
+  TShape extends z.ZodRawShape
+>(
+  tableName: TName,
+  zodSchema: z.ZodObject<TShape>,
+  options: ConversionOptions<TShape>
+): any {
+  const {
+    dialect,
+    primaryKey,
+    jsonColumns: jsonColumnsConfig,
+    references = [],
+    varcharLengths = {},
+    autoIncrementId = true
+  } = options;
+
+  const shape = zodSchema.shape;
+  const columns: Record<string, any> = {};
+
+  const jsonConfigs = jsonColumnsConfig ? jsonColumnsConfig(zodSchema) : {};
+  const exclusiveFields = new Set<string>();
+  for (const [ jsonColName, config ] of Object.entries(jsonConfigs)) {
+    if (config.exclusive) {
+      config.fields.forEach(f => exclusiveFields.add(String(f)));
     }
   }
 
-  for (const [ name, zodObject ] of Object.entries<z.ZodType>(schema.shape)) {
-    if (exclusiveFields.has(name))
-      continue;
+  for (const [ fieldName, zodType ] of Object.entries(shape)) {
+    if (exclusiveFields.has(fieldName)) continue;
 
-    const meta = extractColumnMeta(name, zodObject as ZodTableSchemaInput, options);
-    columns[ name ] = createColumn(meta);
+    const isPrimaryKey = primaryKey === fieldName;
+    columns[ fieldName ] = convertZodTypeToColumn(
+      zodType as z.ZodTypeAny,
+      fieldName,
+      dialect,
+      varcharLengths,
+      autoIncrementId && isPrimaryKey,
+      isPrimaryKey
+    );
+  }
 
-    if (String(options.primaryKey) === name) {
-      columns[ name ] = createColumn({
-        ...meta,
-        isPrimaryKey: true
-      });
+  // JSON columns
+  for (const [ jsonColName ] of Object.entries(jsonConfigs)) {
+    if (dialect === "postgres") {
+      columns[ jsonColName ] = jsonb(jsonColName);
+    } else {
+      columns[ jsonColName ] = sqliteText(jsonColName, { mode: "json" });
     }
   }
 
-  let table: TableTypeByDialect<D>;
-  switch (options.dialect) {
-    case "sqlite":
-      table = sqliteTable(tableName, columns as ColumnsByDialect<"sqlite">) as TableTypeByDialect<D>;
-      break;
-    case "postgres":
-      table = pgTable(tableName, columns as ColumnsByDialect<"postgres">) as TableTypeByDialect<D>;
-      break;
-    case "mysql":
-      table = mysqlTable(tableName, columns as ColumnsByDialect<"mysql">) as TableTypeByDialect<D>;
-      break;
-  }
-
-  let proxy: any;
-
-  const iteratorFn = function* () {
-    yield table;
-    yield columns;
-  };
-
-  proxy = new Proxy(table, {
-    get(target, prop, receiver) {
-      if (prop === Symbol.iterator) return iteratorFn;
-      if (prop === "0") return table;
-      if (prop === "1") return columns;
-      return Reflect.get(target, prop, receiver);
-    },
-
-    has(target, prop) {
-      return prop in target || prop === "0" || prop === "1";
-    },
-
-    ownKeys(target) {
-      return Array.from(
-        new Set([
-          ...Reflect.ownKeys(target),
-          "0",
-          "1",
-          Symbol.iterator,
-        ])
-      );
-    },
-
-    getOwnPropertyDescriptor(target, prop) {
-      if (prop === "0" || prop === "1") {
-        return {
-          configurable: true,
-          enumerable: false,
-          writable: false,
-          value: prop === "0" ? proxy : columns,
-        };
+  // Foreign keys
+  for (const ref of references) {
+    for (const [ domesticCol, foreignCol ] of ref.columns) {
+      if (!columns[ domesticCol ]) {
+        throw new Error(`Foreign key column "${domesticCol}" not found in table "${tableName}"`);
       }
-
-      if (prop === Symbol.iterator) {
-        return {
-          configurable: true,
-          enumerable: false,
-          writable: false,
-          value: iteratorFn,
-        };
-      }
-
-      return Reflect.getOwnPropertyDescriptor(target, prop);
-    },
-  });
-
-  return proxy;
-}
-
-export type JsonField = { _type: "json"; };
-type ColumnWithMeta = Column & { meta?: JsonField; };
-
-function getColumnCreator<D extends Dialects>(dialect: D): ColumnCreator {
-  switch (dialect) {
-    case "sqlite": return createSQLiteColumn;
-    case "postgres": return createPostgresColumn;
-    case "mysql":
-      throw new Error("MySQL support coming soon");
-    default: throw new Error(`Unsupported dialect: ${dialect}`);
-  }
-}
-
-export function getJsonColumnValidator<T extends ZodTableSchemaInput>(
-  column: any
-): ValidatedJsonColumn<T> | null {
-  const schema = (column as any).__zodSchema;
-  if (!schema) return null;
-
-  return {
-    column,
-    schema,
-    parse: (data: unknown) => schema.parse(data),
-    safeParse: (data: unknown) => schema.safeParse(data)
-  };
-}
-
-function extractColumnMeta<T extends z.ZodObject, D extends Dialects>(
-  name: string,
-  zodType: z.ZodType,
-  options: TableOptions<T, D>
-): ColumnMeta {
-  const unwrapped = unwrapType(zodType);
-
-  return {
-    name,
-    type: getBaseType(unwrapped),
-    isOptional: isOptionalType(zodType),
-    isPrimaryKey: options.primaryKey === name,
-    hasDefault: hasDefault(zodType),
-    reference: options.references?.[ name ],
-  };
-}
-
-export function getBaseType(schema: z.ZodType): ColumnMeta[ "type" ] {
-  const typeName = schema.def.type;
-
-  let type: string | undefined;
-  try {
-    const traits = (schema as any)._zod?.traits;
-    if (traits && typeof traits.values === 'function') {
-      const iterator = traits.values();
-      const result = iterator.next();
-      type = result.value;
+      columns[ domesticCol ] = columns[ domesticCol ].references(() => ref.table[ foreignCol ]);
     }
-  } catch {
-    type = typeName;
   }
 
-  if (!type) {
-    type = typeName;
-  }
-
-  if (type === "ZodString") return "string";
-  if (type === "ZodNumber") return "number";
-  if (type === "ZodBoolean") return "boolean";
-  if (type === "ZodDate") return "date";
-  if (type === "ZodEnum" || type === "ZodNativeEnum") return "enum";
-  if (type === "ZodObject" || type === "ZodArray" || type === "ZodRecord" ||
-    type === "ZodMap" || type === "ZodSet" || type === "ZodUnion") {
-    return "json";
-  }
-
-  if (type === "ZodLiteral") {
-    const value = (schema as z.ZodLiteral<any>).value;
-    if (typeof value === "string") return "string";
-    if (typeof value === "number") return "number";
-    if (typeof value === "boolean") return "boolean";
-  }
-
-  return "string";
+  return dialect === "postgres"
+    ? pgTable(tableName, columns)
+    : sqliteTable(tableName, columns);
 }
 
-function isOptionalType(schema: z.ZodTypeAny): boolean {
-  return (
-    schema instanceof z.ZodOptional ||
-    schema instanceof z.ZodNullable ||
-    hasDefault(schema)
-  );
-}
+// ---------------------------------------------------------------------------
+// Convert Zod type → Drizzle column
+// ---------------------------------------------------------------------------
 
-function hasDefault(schema: z.ZodTypeAny): boolean {
-  return schema instanceof z.ZodDefault;
-}
+function convertZodTypeToColumn(
+  zodType: z.ZodTypeAny,
+  fieldName: string,
+  dialect: DatabaseDialect,
+  varcharLengths: Record<string, number>,
+  isAutoIncrementPK: boolean,
+  isPrimaryKey: boolean
+): any {
+  let isOptional = false;
+  let isNullable = false;
+  let hasDefault = false;
+  let defaultValue: any;
+  let innerType = zodType;
 
-function getJoinedSchema(schema: any): z.ZodType<any> {
-  // Base case: It's an object, return the shape directly
-  if (schema instanceof z.ZodObject) {
-    return schema;
+  while (true) {
+    if (innerType instanceof z.ZodOptional) {
+      isOptional = true;
+      innerType = (innerType as z.ZodOptional<z.ZodTypeAny>).unwrap();
+    } else if (innerType instanceof z.ZodNullable) {
+      isNullable = true;
+      innerType = (innerType as z.ZodNullable<z.ZodTypeAny>).unwrap();
+    } else if (innerType instanceof z.ZodDefault) {
+      hasDefault = true;
+      defaultValue = innerType.def.defaultValue;
+      innerType = (innerType as z.ZodDefault<z.ZodTypeAny>).unwrap();
+    } else {
+      break;
+    }
   }
 
-  // Optional/Nullable wrappers (good practice to handle)
-  if (schema instanceof z.ZodNullable) {
-    return getJoinedSchema(schema.unwrap());
+  if (isAutoIncrementPK && innerType instanceof z.ZodNumber) {
+    if (dialect === "postgres") {
+      return serial(fieldName).primaryKey();
+    }
+    return sqliteInteger(fieldName, { mode: "number" }).primaryKey({ autoIncrement: true });
   }
 
-  // Recursive case: It's an intersection, merge left and right
-  if (schema instanceof z.ZodIntersection) {
-    return {
-      ...getJoinedSchema(schema.def.left),
-      ...getJoinedSchema(schema.def.right),
-    };
+  let column: any;
+
+  if (innerType instanceof z.ZodString) {
+    const checks = innerType.def.checks || [];
+    const isUuid = checks.some((c: any) => c.kind === "uuid");
+
+    if (isUuid && dialect === "postgres") {
+      column = uuid(fieldName);
+    } else if (varcharLengths[ fieldName ]) {
+      column = dialect === "postgres"
+        ? pgVarchar(fieldName, { length: varcharLengths[ fieldName ] })
+        : sqliteText(fieldName);
+    } else {
+      column = dialect === "postgres" ? pgText(fieldName) : sqliteText(fieldName);
+    }
+  } else if (innerType instanceof z.ZodNumber) {
+    const checks = innerType.def.checks || [];
+    const isInt = checks.some((c: any) => c.kind === "int");
+
+    if (dialect === "postgres") {
+      column = isInt ? pgInteger(fieldName) : numeric(fieldName);
+    } else {
+      column = isInt
+        ? sqliteInteger(fieldName, { mode: "number" })
+        : sqliteReal(fieldName);
+    }
+  } else if (innerType instanceof z.ZodBoolean) {
+    column = dialect === "postgres"
+      ? pgBoolean(fieldName)
+      : sqliteInteger(fieldName, { mode: "boolean" });
+  } else if (innerType instanceof z.ZodDate) {
+    column = dialect === "postgres"
+      ? timestamp(fieldName, { mode: "date" })
+      : sqliteInteger(fieldName, { mode: "timestamp" });
+  } else if (
+    innerType instanceof z.ZodArray ||
+    innerType instanceof z.ZodObject ||
+    innerType instanceof z.ZodRecord
+  ) {
+    column = dialect === "postgres"
+      ? jsonb(fieldName)
+      : sqliteText(fieldName, { mode: "json" });
+  } else {
+    column = dialect === "postgres" ? pgText(fieldName) : sqliteText(fieldName);
   }
 
-  throw new Error(`Unsupported schema type: ${schema.constructor.name}`);
+  if (isPrimaryKey && !isAutoIncrementPK) {
+    column = column.primaryKey();
+  }
+
+  if (!isOptional && !isNullable && !isPrimaryKey) {
+    column = column.notNull();
+  }
+
+  // NOTE: Per documentation, Zod defaults are NOT mirrored to DB defaults
+  // This is intentional to avoid drift and double-defaulting
+  // hasDefault is intentionally not used here
+
+  return column;
 }
-
-function unwrapType(schema: z.ZodType): z.ZodType {
-  if (schema instanceof z.ZodIntersection) return unwrapType(getJoinedSchema(schema));
-  if (schema instanceof z.ZodDefault) return unwrapType(schema.unwrap() as z.ZodDefault);
-  if (schema instanceof z.ZodOptional) return unwrapType(schema.unwrap() as z.ZodOptional);
-  if (schema instanceof z.ZodNullable) return unwrapType(schema.unwrap() as z.ZodNullable);
-  if ("def" in schema && schema.def.type === "pipe") {
-    return unwrapType((schema as any).def.out);
-  }
-  return schema;
-}
-
-export default createTableFromZod;
-export * from "./types";
-export * from "./errors";

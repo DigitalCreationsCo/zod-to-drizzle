@@ -1,4 +1,4 @@
-import { jsonb } from "drizzle-orm/pg-core";
+import { jsonb, pgTable, text } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { createTableFromZod } from "zod-to-drizzle";
 
@@ -23,7 +23,7 @@ const UserSchema = z.object({
 });
 
 
-const [ users, columns ] = createTableFromZod("users", UserSchema, {
+const users = createTableFromZod("users", UserSchema, {
     dialect: "postgres",
     primaryKey: "id",
     jsonColumns: (schema) => ({
@@ -32,10 +32,24 @@ const [ users, columns ] = createTableFromZod("users", UserSchema, {
             fields: [ "preferences" ],
             exclusive: false
         }
-    })
+    }),
 });
 
-console.log('creating table for users schema\n');
-console.log(UserSchema.shape);
+const PostSchema = z.object({
+    id: z.number(),
+    userId: z.number(),
+    content: z.string(),
+});
+
+const posts = createTableFromZod("posts", PostSchema, {
+    dialect: "postgres",
+    primaryKey: "id",
+    references: [
+        {
+            table: users,
+            columns: [ [ "userId", "id" ] ],
+        }
+    ]
+});
 
 console.log('end');
