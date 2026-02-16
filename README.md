@@ -2,6 +2,14 @@
 
 Convert [Zod](https://zod.dev) schemas to [Drizzle ORM](https://orm.drizzle.team) tables with TypeScript support.
 
+## Update
+Zod schemas are a robust data definition and validation tool. The goal with zod-to-drizzle was to use Zod schemas to generate Drizzle table definitions, unifying validation and database models into a single definition.
+
+The issue is that Drizzle’s type system is heavily class-based rather than purely interface-based, featuring protected member access: Drizzle’s internal utilities perform strict inheritance checks. 
+TypeScript treated the zod schemas as object literals. Even if the object has the exact same "shape" as a Drizzle column, the actual inhertiance throws ts(2345) errors because a non-derived type cannot access the protected members of the Column class. Attempting to spoof this inheritance through complex intersections and type-casting results in fragile code that compromises Drizzle's type safety.
+
+For using zod schemas with drizzle table definitions, use the official drizzle-zod library to derive validation schemas from the database models with type-checking and better compatibility.
+
 ## Features
 
 - 🚀 Convert Zod schemas to Drizzle tables
